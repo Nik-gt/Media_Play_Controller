@@ -190,6 +190,9 @@ class MyForm(tk.Tk):
 
         self.animation_thread =  None
         self.is_paused = False  # Флаг для приостановки анимации
+        # Создаем событие, которое будет использоваться для синхронизации
+        self.pause_event = threading.Event()
+
         self.text_x = 0  # Начальная позиция текста, передаваемая из основного класса
         self.wait = 0.02 #Скорость анимации по умолчанию
         self.width_text_max = int(self.screen_width/4)+33 #Максимально допустимая ширина текста
@@ -200,6 +203,9 @@ class MyForm(tk.Tk):
         self.is_paused = True
         global main_sessions
         self.main_sessions = value
+
+        if self.animation_thread is not None:
+            self.pause_event.wait()  # Ожидаем, пока событие не будет установлено
 
         self.text = value[1]
         self.label.config(text=self.text)
@@ -248,13 +254,12 @@ class MyForm(tk.Tk):
                 self.text_x -= 1
                 if self.text_x + self.text_width < self.width_text_max-50:  # Если текст выходит за пределы экрана
                     self.text_x = 0  # Возвращаем текст в начало
-
                 # Обновляем метку в основном потоке с помощью after()
                 self.after(0, self.label.place, {"x": self.text_x})
             else:
                 self.text_x = 0
                 self.after(0, self.label.place, {"x": 0})
-                self.is_paused_now = True
+                self.pause_event.set()  # Устанавливаем событие, чтобы разблокировать поток
             time.sleep(self.wait)  # Небольшая задержка для плавности анимации
 
     def get_text_width(self): #Получаем ширину текста в пикселях
