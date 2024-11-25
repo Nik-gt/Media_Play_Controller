@@ -25,6 +25,7 @@ class Worker(QThread):
         super().__init__()
         self.previous_properties = None
         self.previous_status = None
+        self.previous_control = None
 
     async def run_async(self):
         while True:
@@ -61,11 +62,13 @@ class Worker(QThread):
                     title = media_properties.title
                     artist = media_properties.artist
                     status = media_session.get_playback_info().playback_status
+                    control = media_session.get_playback_info().controls
 
                     #Проверка, на нужную сессию
-                    if self.previous_properties is None and self.previous_status is None or title != self.previous_properties.title or artist != self.previous_properties.artist or status != 0 and status != self.previous_status:
+                    if self.previous_properties is None and self.previous_status is None or title != self.previous_properties.title or artist != self.previous_properties.artist or status != 0 and status != self.previous_status or control != 0 and control.is_previous_enabled != self.previous_control.is_previous_enabled or control.is_next_enabled != self.previous_control.is_next_enabled:
                             self.previous_properties = media_properties
                             self.previous_status = status
+                            self.previous_control = control
                             # Проверяем, что автор не пустой
                             if artist:
                                 main_sessions.append(f"{artist} - {title}")
