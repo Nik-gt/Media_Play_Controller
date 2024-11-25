@@ -201,29 +201,11 @@ class MyForm(tk.Tk):
     def update_global_var(self, value):
         #Запуск анимации в отдельном потоке, проверка и завершение старого потока, если он был запущен.
         self.is_paused = True
-        global main_sessions
-        self.main_sessions = value
-
         if self.animation_thread is not None:
             self.pause_event.wait()  # Ожидаем, пока событие не будет установлено
 
-        self.text = value[1]
-        self.label.config(text=self.text)
-        self.text_width = self.get_text_width()
-
-        # Если текст не помещается в Label, то запускаем анимацию текста
-        if self.text_width > self.width_text_max: #Сравниваем ширину текста с размером окна Canvas для вывода Label
-            if self.text_width < 1000: self.wait = 0.03
-            if self.text_width < 800: self.wait = 0.05
-            if self.text_width < 600: self.wait = 0.07
-            # Запуск анимации в отдельном потоке
-            if self.animation_thread is None:
-                self.animation_thread = threading.Thread(target=self.animate_text)
-                self.animation_thread.daemon = True  # Поток завершится с завершением главного потока
-                self.animation_thread.start()
-                self.is_paused = False
-            else:
-                self.is_paused = False
+        global main_sessions
+        self.main_sessions = value
 
         try:
             controls = value[0].get_playback_info().controls
@@ -243,8 +225,26 @@ class MyForm(tk.Tk):
                 self.button2.config(image=self.icon_image2_play)
 
         except Exception as e: # Обработка ошибки при получении свойств медиа кнопок
-            #print(f"Ошибка при получении свойств медиа кнопок: {e}")
-            return None
+            raise Exception(f"Ошибка при получении свойств медиа кнопок: {e}")
+
+        self.text = value[1]
+        self.label.config(text=self.text)
+        self.text_width = self.get_text_width()
+
+        # Если текст не помещается в Label, то запускаем анимацию текста
+        if self.text_width > self.width_text_max: #Сравниваем ширину текста с размером окна Canvas для вывода Label
+            self.wait = 0.02
+            if self.text_width < 1000: self.wait = 0.03
+            if self.text_width < 800: self.wait = 0.05
+            if self.text_width < 600: self.wait = 0.07
+            # Запуск анимации в отдельном потоке
+            if self.animation_thread is None:
+                self.animation_thread = threading.Thread(target=self.animate_text)
+                self.animation_thread.daemon = True  # Поток завершится с завершением главного потока
+                self.animation_thread.start()
+                self.is_paused = False
+            else:
+                self.is_paused = False
 
     #Фоновый поток для анимации текста
     def animate_text(self):
@@ -260,6 +260,8 @@ class MyForm(tk.Tk):
                 self.text_x = 0
                 self.after(0, self.label.place, {"x": 0})
                 self.pause_event.set()  # Устанавливаем событие, чтобы разблокировать поток
+                while self.is_paused:
+                    time.sleep(1) #Убираем нагрузку с проверкой в  1 c
             time.sleep(self.wait)  # Небольшая задержка для плавности анимации
 
     def get_text_width(self): #Получаем ширину текста в пикселях
