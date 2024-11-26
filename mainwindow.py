@@ -77,18 +77,22 @@ class Worker(QThread):
                             #print(f"{artist} - {title}. Состояние: {status}")
                             self.global_var_Changed.emit(main_sessions)
                     else: await asyncio.sleep(0.5)  # Задержка асинхронной работы
-            except Exception as e: # Обработка ошибки при получении свойств медиа
+            except: # Обработка ошибки при получении свойств медиа
                 #print(f"Ошибка при получении свойств медиа: {e}")
                 #await asyncio.sleep(0.5)  # Задержка перед повторной попыткой
                 continue
-
-        await asyncio.sleep(0.2)  # Задержка асинхронной работы
+            await asyncio.sleep(0.1)  # Задержка асинхронной работы
 
     def run(self): # Создаем event loop для фонового потока
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)  # Устанавливаем новый event loop в этом потоке
-        loop.run_until_complete(self.run_async())  # Запускаем асинхронную задачу
-        loop.close()
+        while True:
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)  # Устанавливаем новый event loop в этом потоке
+                loop.run_until_complete(self.run_async())  # Запускаем асинхронную задачу
+                loop.close()
+            except: # Обработка ошибки при получении свойств медиа
+                continue
+
 
 ########################################################################################################################################################################
 
@@ -112,6 +116,7 @@ def resource_path(relative_path): #Для создания .exe файла
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
+
 class MyForm(tk.Tk):
     main_sessions = None #Сессиия медиа
 
@@ -132,7 +137,6 @@ class MyForm(tk.Tk):
         #self.withdraw()  # Скрываем окно при запуске
 
         # Убираем рамку окна и делаем его прозрачным
-        self.overrideredirect(True)
         self.attributes("-topmost", True)  # Закрепляем окно на переднем плане
         self.attributes("-transparentcolor", "black")  # Делаем фон белым и прозрачным
 
@@ -181,6 +185,10 @@ class MyForm(tk.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self.hide_window)
 
+        self.text_x = 0  # Начальная позиция текста, передаваемая из основного класса
+        self.wait = 0.02 #Скорость анимации по умолчанию
+        self.width_text_max = int(self.screen_width/4)+33 #Максимально допустимая ширина текста
+
         #Запуск фонового потока для отслеживания медиа других приложений
         self.worker = Worker()
         self.worker.global_var_Changed.connect(self.update_global_var)
@@ -190,18 +198,16 @@ class MyForm(tk.Tk):
         self.check_topmost_thread = Thread(target=self.keep_on_top)
         self.check_topmost_thread.daemon = True
         self.check_topmost_thread.start()
+        self.tray_pause = False
+
 
         self.animation_thread =  None
         self.is_paused = False  # Флаг для приостановки анимации
         # Создаем событие, которое будет использоваться для синхронизации
         self.pause_event = threading.Event()
 
-        self.text_x = 0  # Начальная позиция текста, передаваемая из основного класса
-        self.wait = 0.02 #Скорость анимации по умолчанию
-        self.width_text_max = int(self.screen_width/4)+33 #Максимально допустимая ширина текста
 
-
-    def update_global_var(self, value):
+    def update_global_var(self, value):        
         #Запуск анимации в отдельном потоке, проверка и завершение старого потока, если он был запущен.
         self.is_paused = True
         if self.animation_thread is not None:
@@ -230,23 +236,25 @@ class MyForm(tk.Tk):
         except Exception as e: # Обработка ошибки при получении свойств медиа кнопок
             raise Exception(f"Ошибка при получении свойств медиа кнопок: {e}")
 
+
         self.text = value[1]
         self.label.config(text=self.text)
         self.text_width = self.get_text_width()
-
         # Если текст не помещается в Label, то запускаем анимацию текста
         if self.text_width > self.width_text_max: #Сравниваем ширину текста с размером окна Canvas для вывода Label
             self.wait = 0.02
             if self.text_width < 1000: self.wait = 0.03
             if self.text_width < 800: self.wait = 0.05
             if self.text_width < 600: self.wait = 0.07
-            # Запуск анимации в отдельном потоке
+            # Запуск анимации в отдельном потоке            
             if self.animation_thread is None:
                 self.animation_thread = threading.Thread(target=self.animate_text)
                 self.animation_thread.daemon = True  # Поток завершится с завершением главного потока
+                time.sleep(0)
                 self.animation_thread.start()
                 self.is_paused = False
             else:
+                time.sleep(0)
                 self.is_paused = False
 
     #Фоновый поток для анимации текста
@@ -264,7 +272,10 @@ class MyForm(tk.Tk):
                 self.after(0, self.label.place, {"x": 0})
                 self.pause_event.set()  # Устанавливаем событие, чтобы разблокировать поток
                 while self.is_paused:
+                    self.tray_pause = False
                     time.sleep(1) #Убираем нагрузку с проверкой в  1 c
+                self.tray_pause = True
+                continue
             time.sleep(self.wait)  # Небольшая задержка для плавности анимации
 
     def get_text_width(self): #Получаем ширину текста в пикселях
@@ -290,10 +301,18 @@ class MyForm(tk.Tk):
         if self.main_sessions[0]:
             self.main_sessions[0].try_skip_next_async()
 
+    def keep_on_top1(self, event):
+        if self.was_focused:
+            print("Lost focus")
+            self.lift()
+            self.was_focused = False
+
     def keep_on_top(self):
         while True:
-            self.lift()  # Попытка поднять окно на передний план
             time.sleep(0.1)  # Пауза, чтобы избежать излишней нагрузки на процессор
+            if not self.is_paused or not self.tray_pause:
+                self.lift()
+
 
 
 def on_clicked(icon, item):
