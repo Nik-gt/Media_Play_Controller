@@ -198,7 +198,7 @@ class MyForm(tk.Tk):
         self.check_topmost_thread = Thread(target=self.keep_on_top)
         self.check_topmost_thread.daemon = True
         self.check_topmost_thread.start()
-        self.tray_pause = False
+        self.tray_pause = True
 
 
         self.animation_thread =  None
