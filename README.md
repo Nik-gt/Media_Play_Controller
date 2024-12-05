@@ -1,6 +1,4 @@
 # Media_Play_Controller
-
-#############################################################################################################################
 Документация по исходным кодам MS:
 #https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssession?view=winrt-26100
 
