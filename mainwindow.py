@@ -6,7 +6,7 @@ from threading import Thread
 import time
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, QObject, QTimer, Slot
 import asyncio
 
 from winsdk.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
@@ -16,6 +16,7 @@ import tkinter as tk
 from pystray import Icon, MenuItem
 from PIL import Image
 from win32api import GetSystemMetrics
+import keyboard
 
 # Класс нужен для отдельного потока, который отслеживает другие сессии медиа
 class Worker(QThread):
@@ -45,18 +46,7 @@ class Worker(QThread):
                    # Получаем свойства медиа
                    media_properties = await media_session.try_get_media_properties_async()
 
-                   # Если свойства медиа доступны, извлекаем необходимые данные
-                   #    'album_artist': str,
-                   #    'album_title': str,
-                   #    'album_track_count': int,
-                   #    'artist': str,
-                   #    'genres': list,
-                   #    'playback_type': int,
-                   #    'subtitle': str,
-                   #    'thumbnail':
-                   #        <_winrt_Windows_Storage_Streams.IRandomAccessStreamReference object at ?>,
-                   #    'title': str,
-                   #    'track_number': int,
+
 
                    if media_properties:
                     title = media_properties.title
@@ -81,7 +71,7 @@ class Worker(QThread):
                 #print(f"Ошибка при получении свойств медиа: {e}")
                 #await asyncio.sleep(0.5)  # Задержка перед повторной попыткой
                 continue
-            await asyncio.sleep(0.1)  # Задержка асинхронной работы
+            await asyncio.sleep(0.1)  # Задержка асинхронной ��аботы
 
     def run(self): # Создаем event loop для фонового потока
         while True:
@@ -94,20 +84,6 @@ class Worker(QThread):
                 continue
 
 
-########################################################################################################################################################################
-
-            #https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssession?view=winrt-26100
-
-            #player_time = 10 #секунд
-            #media_session.try_change_playback_position_async(player_time*10000000) # в тиках
-            #print("Позиция 10 сек.")
-
-            #TryChangeAutoRepeatModeAsync(MediaPlaybackAutoRepeatMode)
-
-            #GetPlaybackInfo() #Вроде получить позицию и статус проигрывания
-            #TrySkipNextAsync()
-            #TrySkipPreviousAsync()
-
 
 def resource_path(relative_path): #Для создания .exe файла
     try: # PyInstaller creates a temp folder and stores path in _MEIPASS
@@ -115,6 +91,42 @@ def resource_path(relative_path): #Для создания .exe файла
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
+
+class AnimationWorker(QThread):
+    update_position = Signal(int)
+
+    def __init__(self, text_width, width_text_max, wait):
+        super().__init__()
+        self.text_x = 0
+        self.text_width = text_width
+        self.width_text_max = width_text_max
+        self.wait = wait
+        self.is_paused = False
+        self.running = True
+
+    def run(self):
+        while self.running:
+            if not self.is_paused:
+                self.text_x -= 1
+                if self.text_x + self.text_width < self.width_text_max - 50:
+                    self.text_x = 0
+                self.update_position.emit(self.text_x)
+            else:
+                self.text_x = 0
+                self.update_position.emit(0)
+            time.sleep(self.wait)
+
+    def pause(self):
+        self.is_paused = True
+
+    def resume(self):
+        self.is_paused = False
+
+    def stop(self):
+        self.running = False
+        self.quit()
+        self.wait()
 
 
 class MyForm(tk.Tk):
@@ -134,7 +146,6 @@ class MyForm(tk.Tk):
 
         self.overrideredirect(True)  # Убираем рамку окна
         self.geometry(f"{self.width}x{self.height}+{self.x}+{self.y}")
-        #self.withdraw()  # Скрываем окно при запуске
 
         # Убираем рамку окна и делаем его прозрачным
         self.attributes("-topmost", True)  # Закрепляем окно на переднем плане
@@ -181,7 +192,7 @@ class MyForm(tk.Tk):
         self.canvas.place(x=160, y=10)  # Устанавливаем начальную позицию метки
 
         self.label = tk.Label(self.canvas, font=("Arial", 14), bg="black", fg="white", bd=0, relief="flat")
-        self.label.place(x=0, y=0)  # Устанавливаем начальную позицию метки
+        self.label.place(x=0, y=0)  # Устанавливаем начальную позицию меки
 
         self.protocol("WM_DELETE_WINDOW", self.hide_window)
 
@@ -195,23 +206,25 @@ class MyForm(tk.Tk):
         self.worker.start()
 
         # Запуск потока для постоянной проверки положения окна
-        self.check_topmost_thread = Thread(target=self.keep_on_top)
-        self.check_topmost_thread.daemon = True
-        self.check_topmost_thread.start()
-        self.tray_pause = True
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.keep_on_top)
+        self.timer.start(100)  # Проверка каждые 100 мс
 
+        self.animation_worker = None
 
-        self.animation_thread =  None
-        self.is_paused = False  # Флаг для приостановки анимации
-        # Создаем событие, которое будет использоваться для синхронизации
-        self.pause_event = threading.Event()
+        # Устанавливаем горячие клавиши
+        keyboard.add_hotkey('ctrl+space', self.on_button_play_click)
+        keyboard.add_hotkey('ctrl+left', self.on_button_previous_click)
+        keyboard.add_hotkey('ctrl+right', self.on_button_next_click)
+        keyboard.add_hotkey('ctrl+down', self.hide_window)
+        keyboard.add_hotkey('ctrl+up', self.show_window)
 
 
     def update_global_var(self, value):        
         #Запуск анимации в отдельном потоке, проверка и завершение старого потока, если он был запущен.
         self.is_paused = True
-        if self.animation_thread is not None:
-            self.pause_event.wait()  # Ожидаем, пока событие не будет установлено
+        if self.animation_worker is not None:
+            self.animation_worker.pause()  # Ожидаем, пока событие не будет установлено
 
         global main_sessions
         self.main_sessions = value
@@ -240,43 +253,26 @@ class MyForm(tk.Tk):
         self.text = value[1]
         self.label.config(text=self.text)
         self.text_width = self.get_text_width()
-        # Если текст не помещается в Label, то запускаем анимацию текста
-        if self.text_width > self.width_text_max: #Сравниваем ширину текста с размером окна Canvas для вывода Label
+
+        if self.text_width > self.width_text_max:
             self.wait = 0.02
             if self.text_width < 1000: self.wait = 0.03
             if self.text_width < 800: self.wait = 0.05
             if self.text_width < 600: self.wait = 0.07
-            # Запуск анимации в отдельном потоке            
-            if self.animation_thread is None:
-                self.animation_thread = threading.Thread(target=self.animate_text)
-                self.animation_thread.daemon = True  # Поток завершится с завершением главного потока
-                time.sleep(0)
-                self.animation_thread.start()
-                self.is_paused = False
-            else:
-                time.sleep(0)
-                self.is_paused = False
 
-    #Фоновый поток для анимации текста
-    def animate_text(self):
-        while True:
-            if not self.is_paused:
-                # Сдвигаем текст по оси X
-                self.text_x -= 1
-                if self.text_x + self.text_width < self.width_text_max-50:  # Если текст выходит за пределы экрана
-                    self.text_x = 0  # Возвращаем текст в начало
-                # Обновляем метку в основном потоке с помощью after()
-                self.after(0, self.label.place, {"x": self.text_x})
+            if self.animation_worker is None:
+                self.animation_worker = AnimationWorker(self.text_width, self.width_text_max, self.wait)
+                self.animation_worker.update_position.connect(self.update_label_position)
+                self.animation_worker.start()
             else:
-                self.text_x = 0
-                self.after(0, self.label.place, {"x": 0})
-                self.pause_event.set()  # Устанавливаем событие, чтобы разблокировать поток
-                while self.is_paused:
-                    self.tray_pause = False
-                    time.sleep(1) #Убираем нагрузку с проверкой в  1 c
-                self.tray_pause = True
-                continue
-            time.sleep(self.wait)  # Небольшая задержка для плавности анимации
+                self.animation_worker.resume()
+        else:
+            if self.animation_worker is not None:
+                self.animation_worker.pause()
+
+    @Slot(int)
+    def update_label_position(self, x):
+        self.label.place(x=x)
 
     def get_text_width(self): #Получаем ширину текста в пикселях
         font = self.label.cget("font")
@@ -301,18 +297,14 @@ class MyForm(tk.Tk):
         if self.main_sessions[0]:
             self.main_sessions[0].try_skip_next_async()
 
-    def keep_on_top1(self, event):
-        if self.was_focused:
-            print("Lost focus")
-            self.lift()
-            self.was_focused = False
-
     def keep_on_top(self):
-        while True:
-            time.sleep(0.1)  # Пауза, чтобы избежать излишней нагрузки на процессор
-            if not self.is_paused or not self.tray_pause:
-                self.lift()
+        self.lift()
 
+    def on_close(self):
+        if self.animation_worker is not None:
+            self.animation_worker.stop()
+        keyboard.unhook_all_hotkeys()  # Отсоединяем все горячие клавиши при закрытии
+        self.quit()
 
 
 def on_clicked(icon, item):
@@ -351,6 +343,6 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     window = MyForm() # Создание нового экземпляра формы
+    window.protocol("WM_DELETE_WINDOW", window.on_close)
     window.mainloop()
-    #sys.exit(app.exec_())
     sys.exit()
